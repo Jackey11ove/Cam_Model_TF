@@ -69,7 +69,7 @@ else:
 annopath = os.path.join(args.voc_root, 'VOC2007', 'Annotations', '%s.xml')
 imgpath = os.path.join(args.voc_root, 'VOC2007', 'JPEGImages', '%s.jpg')
 imgsetpath = os.path.join(args.voc_root, 'VOC2007', 'ImageSets',
-                          'Main', '{:s}.txt')
+                          'Main', 'test.txt')
 YEAR = '2007'
 devkit_path = args.voc_root + 'VOC' + YEAR
 dataset_mean = (104, 117, 123)
@@ -171,7 +171,7 @@ def do_python_eval(output_dir='output', use_07=True):
     for i, cls in enumerate(labelmap):
         filename = get_voc_results_file_template(set_type, cls)
         rec, prec, ap = voc_eval(
-           filename, annopath, imgsetpath.format(set_type), cls, cachedir,
+           filename, annopath, imgsetpath, cls, cachedir,
            ovthresh=0.5, use_07_metric=use_07_metric)
         aps += [ap]
         print('AP for {} = {:.4f}'.format(cls, ap))
@@ -285,7 +285,7 @@ cachedir: Directory for caching the annotations
     for imagename in imagenames:
         R = [obj for obj in recs[imagename] if obj['name'] == classname]
         bbox = np.array([x['bbox'] for x in R])
-        difficult = np.array([x['difficult'] for x in R]).astype(np.bool)
+        difficult = np.array([x['difficult'] for x in R]).astype(np.bool_)
         det = [False] * len(R)
         npos = npos + sum(~difficult)
         class_recs[imagename] = {'bbox': bbox,
@@ -377,7 +377,7 @@ def test_net(save_folder, quantize_flag, net:SSD, cuda, dataset, transform, top_
 
     # 这部分内容是为量化做准备，确定量化层并进行量化前向推理，确定数据范围
     if quantize_flag == True:
-        net.quantize(num_bits=8)
+        net.quantize(num_bits=16)
         net.eval()
         for i in range(num_images):
             im, gt, h, w = dataset.pull_item(i)
@@ -399,7 +399,7 @@ def test_net(save_folder, quantize_flag, net:SSD, cuda, dataset, transform, top_
         
         # Most important part
         if quantize_flag == False:
-            detections = net(x).data
+            detections = net.forward(x).data
         else:
             detections = net.quantize_inference(x).data
 
@@ -547,17 +547,22 @@ if __name__ == '__main__':
     if args.cuda:
         net = net.cuda()
         cudnn.benchmark = True 
+
     # evaluation
+    '''
     # full_inference:
     print('Evaluation of full_inference model:')
     quantize_flag = False
     test_net(args.save_folder, quantize_flag, net, args.cuda, dataset,
-             BaseTransform(net.size, dataset_mean), args.top_k, 300,
+             BaseTransform(300, dataset_mean), args.top_k, 300,
              thresh=args.confidence_threshold)
+    '''
     
+    #'''
     # quantize_inference
     print('Evaluation of quantize_inference model:')
     quantize_flag = True
     test_net(args.save_folder, quantize_flag, net, args.cuda, dataset,
-             BaseTransform(net.size, dataset_mean), args.top_k, 300,
+             BaseTransform(300, dataset_mean), args.top_k, 300,
              thresh=args.confidence_threshold)
+    #'''

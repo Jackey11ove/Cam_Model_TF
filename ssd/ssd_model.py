@@ -97,8 +97,6 @@ class Vgg_upto_Conv4_3(nn.Module):
         self.qconv10 = QConv2d(quant_type, self.conv10, qi=False, qo=True, num_bits=num_bits, e_bits=e_bits)
         self.qrelu10 = QReLU(quant_type, qi=False, qo=False, num_bits=num_bits, e_bits=e_bits)  #conv4-3
 
-        return self.qconv10.qo
-
    
     def quantize_forward(self, x):
         x = self.qconv1(x)
@@ -127,7 +125,7 @@ class Vgg_upto_Conv4_3(nn.Module):
         x = self.qrelu9(x)
         x = self.qconv10(x)
         x = self.qrelu10(x)  #conv4-3
-        return x
+        return x,self.qconv10.qo
 
     def freeze(self):
         self.qconv1.freeze()
@@ -234,9 +232,6 @@ class Vgg_upto_fc7(nn.Module):
         # Quantize conv15 and relu15
         self.qconv15 = QConv2d(quant_type, self.conv15, qi=False, qo=True, num_bits=num_bits, e_bits=e_bits)
         self.qrelu15 = QReLU(quant_type, qi=False, qo=False, num_bits=num_bits, e_bits=e_bits)
-
-        return self.qconv15.qo
-
     
     def quantize_forward(self, x):
         x = self.qmax_pool2d4(x)
@@ -254,7 +249,7 @@ class Vgg_upto_fc7(nn.Module):
         x = self.qconv15(x)
         x = self.qrelu15(x)
     
-        return x
+        return x,self.qconv15.qo
 
     def freeze(self):
         self.qmax_pool2d4.freeze(self.pre_qo)
@@ -300,29 +295,35 @@ class Extra_Conv6_2(nn.Module):
         self.pre_qo = pre_qo
 
     def forward(self, x):
-        x = self.conv16(x)
-        x = self.conv17(x)
+        x = F.relu(self.conv16(x)) 
+        x = F.relu(self.conv17(x))
         return x
 
     def quantize(self, quant_type='INT', num_bits=8, e_bits=3):
         # Quantize conv16 and Conv17
         self.qconv16 = QConv2d(quant_type, self.conv16, qi=False, qo=True, num_bits=num_bits, e_bits=e_bits)
+        self.qrelu16 = QReLU(quant_type, qi=False, qo=False, num_bits=num_bits, e_bits=e_bits)
         self.qconv17 = QConv2d(quant_type, self.conv17, qi=False, qo=True, num_bits=num_bits, e_bits=e_bits)
-
-        return self.qconv17.qo
+        self.qrelu17 = QReLU(quant_type, qi=False, qo=False, num_bits=num_bits, e_bits=e_bits)
     
     def quantize_forward(self, x):
         x = self.qconv16(x)
+        x = self.qrelu16(x)
         x = self.qconv17(x)
-        return x
+        x = self.qrelu17(x)
+        return x,self.qconv17.qo
 
     def freeze(self):
         self.qconv16.freeze(qi=self.pre_qo)
+        self.qrelu16.freeze(self.qconv16.qo)
         self.qconv17.freeze(self.qconv16.qo)
+        self.qrelu17.freeze(self.qconv17.qo)
 
     def quantize_inference(self, x):
         qx = self.qconv16.quantize_inference(x)
+        qx = self.qrelu16.quantize_inference(qx)
         qx = self.qconv17.quantize_inference(qx)
+        qx = self.qrelu17.quantize_inference(qx)
         return qx
         
 
@@ -335,28 +336,35 @@ class Extra_Conv7_2(nn.Module):
         self.pre_qo = pre_qo
 
     def forward(self, x):
-        x = self.conv18(x)
-        x = self.conv19(x)
+        x = F.relu(self.conv18(x))
+        x = F.relu(self.conv19(x))
         return x
 
     def quantize(self, quant_type='INT', num_bits=8, e_bits=3):
         # Quantize conv16 and Conv17
         self.qconv18 = QConv2d(quant_type, self.conv18, qi=False, qo=True, num_bits=num_bits, e_bits=e_bits)
+        self.qrelu18 = QReLU(quant_type, qi=False, qo=False, num_bits=num_bits, e_bits=e_bits)
         self.qconv19 = QConv2d(quant_type, self.conv19, qi=False, qo=True, num_bits=num_bits, e_bits=e_bits)
-        return self.qconv19.qo
+        self.qrelu19 = QReLU(quant_type, qi=False, qo=False, num_bits=num_bits, e_bits=e_bits)
     
     def quantize_forward(self, x):
         x = self.qconv18(x)
+        x = self.qrelu18(x)
         x = self.qconv19(x)
-        return x
+        x = self.qrelu19(x)
+        return x,self.qconv19.qo
 
     def freeze(self):
         self.qconv18.freeze(qi=self.pre_qo)
+        self.qrelu18.freeze(self.qconv18.qo)
         self.qconv19.freeze(self.qconv18.qo)
+        self.qrelu19.freeze(self.qconv19.qo)
 
     def quantize_inference(self, x):
         qx = self.qconv18.quantize_inference(x)
+        qx = self.qrelu18.quantize_inference(qx)
         qx = self.qconv19.quantize_inference(qx)
+        qx = self.qrelu19.quantize_inference(qx)
         return qx
     
     
@@ -365,32 +373,39 @@ class Extra_Conv8_2(nn.Module):
     def __init__(self,pre_qo):
         super(Extra_Conv8_2, self).__init__()
         self.conv20 = nn.Conv2d(256, 128, 1, 1)
-        self.conv21 = nn.Conv2d(128, 256, 3, 2)
+        self.conv21 = nn.Conv2d(128, 256, 3, 1)
         self.pre_qo = pre_qo
 
     def forward(self, x):
-        x = self.conv20(x)
-        x = self.conv21(x)
+        x = F.relu(self.conv20(x))
+        x = F.relu(self.conv21(x))
         return x
 
     def quantize(self, quant_type='INT', num_bits=8, e_bits=3):
         # Quantize conv16 and Conv17
         self.qconv20 = QConv2d(quant_type, self.conv20, qi=False, qo=True, num_bits=num_bits, e_bits=e_bits)
+        self.qrelu20= QReLU(quant_type, qi=False, qo=False, num_bits=num_bits, e_bits=e_bits)
         self.qconv21 = QConv2d(quant_type, self.conv21, qi=False, qo=True, num_bits=num_bits, e_bits=e_bits)
-        return self.qconv21.qo
+        self.qrelu21 = QReLU(quant_type, qi=False, qo=False, num_bits=num_bits, e_bits=e_bits)
     
     def quantize_forward(self, x):
         x = self.qconv20(x)
+        x = self.qrelu20(x)
         x = self.qconv21(x)
-        return x
+        x = self.qrelu21(x)
+        return x, self.qconv21.qo
 
     def freeze(self):
         self.qconv20.freeze(qi=self.pre_qo)
+        self.qrelu20.freeze(self.qconv20.qo)
         self.qconv21.freeze(self.qconv20.qo)
+        self.qrelu21.freeze(self.qconv21.qo)
 
     def quantize_inference(self, x):
         qx = self.qconv20.quantize_inference(x)
+        qx = self.qrelu20.quantize_inference(qx)
         qx = self.qconv21.quantize_inference(qx)
+        qx = self.qrelu21.quantize_inference(qx)
         return qx
 
     
@@ -399,32 +414,39 @@ class Extra_Conv9_2(nn.Module):
     def __init__(self,pre_qo):
         super(Extra_Conv9_2, self).__init__()
         self.conv22 = nn.Conv2d(256, 128, 1, 1)
-        self.conv23 = nn.Conv2d(128, 256, 3, 2)
+        self.conv23 = nn.Conv2d(128, 256, 3, 1)
         self.pre_qo = pre_qo
 
     def forward(self, x):
-        x = self.conv22(x)
-        x = self.conv23(x)
+        x = F.relu(self.conv22(x))
+        x = F.relu(self.conv23(x))
         return x
 
     def quantize(self, quant_type='INT', num_bits=8, e_bits=3):
         # Quantize conv16 and Conv17
         self.qconv22 = QConv2d(quant_type, self.conv22, qi=False, qo=True, num_bits=num_bits, e_bits=e_bits)
+        self.qrelu22 = QReLU(quant_type, qi=False, qo=False, num_bits=num_bits, e_bits=e_bits)
         self.qconv23 = QConv2d(quant_type, self.conv23, qi=False, qo=True, num_bits=num_bits, e_bits=e_bits)
-        return self.qconv23.qo
+        self.qrelu23 = QReLU(quant_type, qi=False, qo=False, num_bits=num_bits, e_bits=e_bits)
     
     def quantize_forward(self, x):
         x = self.qconv22(x)
+        x = self.qrelu22(x)
         x = self.qconv23(x)
-        return x
+        x = self.qrelu23(x)
+        return x,self.qconv23.qo
 
     def freeze(self):
         self.qconv22.freeze(qi=self.pre_qo)
+        self.qrelu22.freeze(self.qconv22.qo)
         self.qconv23.freeze(self.qconv22.qo)
+        self.qrelu23.freeze(self.qconv23.qo)
 
     def quantize_inference(self, x):
         qx = self.qconv22.quantize_inference(x)
+        qx = self.qrelu22.quantize_inference(qx)
         qx = self.qconv23.quantize_inference(qx)
+        qx = self.qrelu23.quantize_inference(qx)
         return qx
 
 # Detector, qi_flag的作用是区分第一个Detector和其它，第一个经过了L2Norm，feature1作为输入其范围已经变了，需要初始化qi
@@ -433,7 +455,7 @@ class Detector(nn.Module):
 
     def __init__(self,pre_qo,qi_flag,in_channels,num_anchors,num_classes):
         super(Detector, self).__init__()
-        self.pre_go = pre_qo
+        self.pre_qo = pre_qo
         self.qi_flag = qi_flag
         self.in_channels = in_channels
         self.num_anchors = num_anchors
@@ -456,7 +478,7 @@ class Detector(nn.Module):
         if self.qi_flag:
             self.qconv_loc.freeze()
         else:
-            self.qconv_loc.freeze(qi=self.pre_go)
+            self.qconv_loc.freeze(qi=self.pre_qo)
 
     def quantize_inference(self, x):
         qx = self.qconv_loc.quantize_inference(x)
@@ -467,7 +489,7 @@ class Classifier(nn.Module):
 
     def __init__(self,pre_qo,qi_flag,in_channels,num_anchors,num_classes):
         super(Classifier, self).__init__()
-        self.pre_go = pre_qo
+        self.pre_qo = pre_qo
         self.qi_flag = qi_flag
         self.in_channels = in_channels
         self.num_anchors = num_anchors
@@ -490,7 +512,7 @@ class Classifier(nn.Module):
         if self.qi_flag:
             self.qconv_conf.freeze()
         else:
-            self.qconv_conf.freeze(qi=self.pre_go)
+            self.qconv_conf.freeze(qi=self.pre_qo)
 
     def quantize_inference(self, x):
         qx = self.qconv_conf.quantize_inference(x)
@@ -513,28 +535,28 @@ class SSD(nn.Module):
 
         # Buils layers
         self.vgg_upto_conv4_3 = Vgg_upto_Conv4_3()
-        self.vgg_upto_fc7 = Vgg_upto_fc7(pre_qo=self.vgg_upto_conv4_3.quantize())
-        self.extra_conv6_2 = Extra_Conv6_2(pre_qo=self.vgg_upto_fc7.quantize())
-        self.extra_conv7_2 = Extra_Conv7_2(pre_qo=self.extra_conv6_2.quantize())
-        self.extra_conv8_2 = Extra_Conv8_2(pre_qo=self.extra_conv7_2.quantize())
-        self.extra_conv9_2 = Extra_Conv9_2(pre_qo=self.extra_conv8_2.quantize())
+        self.vgg_upto_fc7 = Vgg_upto_fc7(pre_qo=None)
+        self.extra_conv6_2 = Extra_Conv6_2(pre_qo=None)
+        self.extra_conv7_2 = Extra_Conv7_2(pre_qo=None)
+        self.extra_conv8_2 = Extra_Conv8_2(pre_qo=None)
+        self.extra_conv9_2 = Extra_Conv9_2(pre_qo=None)
 
         self.loc_layers = nn.ModuleList([
-            Detector(pre_qo=self.vgg_upto_conv4_3.quantize(), qi_flag = True, in_channels=512, num_anchors=4, num_classes=self.num_classes),
-            Detector(pre_qo=self.vgg_upto_fc7.quantize(), qi_flag = False, in_channels=1024, num_anchors=6, num_classes=self.num_classes),
-            Detector(pre_qo=self.extra_conv6_2.quantize(), qi_flag = False,  in_channels=512, num_anchors=6, num_classes=self.num_classes),
-            Detector(pre_qo=self.extra_conv7_2.quantize(), qi_flag = False, in_channels=256, num_anchors=6, num_classes=self.num_classes),
-            Detector(pre_qo=self.extra_conv8_2.quantize(), qi_flag = False, in_channels=256, num_anchors=4, num_classes=self.num_classes),
-            Detector(pre_qo=self.extra_conv9_2.quantize(), qi_flag = False, in_channels=256, num_anchors=4, num_classes=self.num_classes)
+            Detector(pre_qo=None, qi_flag = True, in_channels=512, num_anchors=4, num_classes=self.num_classes),
+            Detector(pre_qo=None, qi_flag = False, in_channels=1024, num_anchors=6, num_classes=self.num_classes),
+            Detector(pre_qo=None, qi_flag = False,  in_channels=512, num_anchors=6, num_classes=self.num_classes),
+            Detector(pre_qo=None, qi_flag = False, in_channels=256, num_anchors=6, num_classes=self.num_classes),
+            Detector(pre_qo=None, qi_flag = False, in_channels=256, num_anchors=4, num_classes=self.num_classes),
+            Detector(pre_qo=None, qi_flag = False, in_channels=256, num_anchors=4, num_classes=self.num_classes)
         ])
 
         self.conf_layers = nn.ModuleList([
-           Classifier(pre_qo=self.vgg_upto_conv4_3.quantize(), qi_flag = True, in_channels=512, num_anchors=4, num_classes=self.num_classes),
-           Classifier(pre_qo=self.vgg_upto_fc7.quantize(), qi_flag = False, in_channels=1024, num_anchors=6, num_classes=self.num_classes),
-           Classifier(pre_qo=self.extra_conv6_2.quantize(), qi_flag = False,  in_channels=512, num_anchors=6, num_classes=self.num_classes),
-           Classifier(pre_qo=self.extra_conv7_2.quantize(), qi_flag = False, in_channels=256, num_anchors=6, num_classes=self.num_classes),
-           Classifier(pre_qo=self.extra_conv8_2.quantize(), qi_flag = False, in_channels=256, num_anchors=4, num_classes=self.num_classes),
-           Classifier(pre_qo=self.extra_conv9_2.quantize(), qi_flag = False, in_channels=256, num_anchors=4, num_classes=self.num_classes)
+           Classifier(pre_qo=None, qi_flag = True, in_channels=512, num_anchors=4, num_classes=self.num_classes),
+           Classifier(pre_qo=None, qi_flag = False, in_channels=1024, num_anchors=6, num_classes=self.num_classes),
+           Classifier(pre_qo=None, qi_flag = False, in_channels=512, num_anchors=6, num_classes=self.num_classes),
+           Classifier(pre_qo=None, qi_flag = False, in_channels=256, num_anchors=6, num_classes=self.num_classes),
+           Classifier(pre_qo=None, qi_flag = False, in_channels=256, num_anchors=4, num_classes=self.num_classes),
+           Classifier(pre_qo=None, qi_flag = False, in_channels=256, num_anchors=4, num_classes=self.num_classes)
         ])        
 
 
@@ -583,19 +605,47 @@ class SSD(nn.Module):
             layer.quantize(quant_type, num_bits, e_bits)
     
     def quantize_forward(self, x):
-        fq_conv4_3_feats = self.vgg_upto_conv4_3.quantize_forward(x)
+        fq_conv4_3_feats, qo = self.vgg_upto_conv4_3.quantize_forward(x)
+        self.vgg_upto_fc7.pre_qo = qo
+        self.loc_layers[0].pre_qo = qo
+        self.conf_layers[0].pre_qo = qo
         normed_fq_conv4_3_feats = self.L2Norm(fq_conv4_3_feats)
-        fq_fc7_feats = self.vgg_upto_fc7.quantize_forward(fq_conv4_3_feats)
-        fq_conv6_2_feats = self.extra_conv6_2.quantize_forward(fq_fc7_feats)
-        fq_conv7_2_feats = self.extra_conv7_2.quantize_forward(fq_conv6_2_feats)
-        fq_conv8_2_feats = self.extra_conv8_2.quantize_forward(fq_conv7_2_feats)
-        fq_conv9_2_feats = self.extra_conv9_2.quantize_forward(fq_conv8_2_feats)
+        self.loc_layers[0].quantize_forward(normed_fq_conv4_3_feats)
+        self.conf_layers[0].quantize_forward(normed_fq_conv4_3_feats)
 
-        features = [normed_fq_conv4_3_feats, fq_fc7_feats, fq_conv6_2_feats, fq_conv7_2_feats, fq_conv8_2_feats, fq_conv9_2_feats]
+        fq_fc7_feats, qo = self.vgg_upto_fc7.quantize_forward(fq_conv4_3_feats)
+        self.extra_conv6_2.pre_qo = qo
+        self.loc_layers[1].pre_qo = qo
+        self.conf_layers[1].pre_qo = qo
+        self.loc_layers[1].quantize_forward(fq_fc7_feats)
+        self.conf_layers[1].quantize_forward(fq_fc7_feats)
 
-        for i, feature in enumerate(features):
-            self.loc_layers[i].quantize_foward(feature)
-            self.conf_layers[i].quantize_foward(feature)
+        fq_conv6_2_feats, qo = self.extra_conv6_2.quantize_forward(fq_fc7_feats)
+        self.extra_conv7_2.pre_qo = qo
+        self.loc_layers[2].pre_qo = qo
+        self.conf_layers[2].pre_qo = qo
+        self.loc_layers[2].quantize_forward(fq_conv6_2_feats)
+        self.conf_layers[2].quantize_forward(fq_conv6_2_feats)
+
+        fq_conv7_2_feats, qo = self.extra_conv7_2.quantize_forward(fq_conv6_2_feats)
+        self.extra_conv8_2.pre_qo = qo
+        self.loc_layers[3].pre_qo = qo
+        self.conf_layers[3].pre_qo = qo
+        self.loc_layers[3].quantize_forward(fq_conv7_2_feats)
+        self.conf_layers[3].quantize_forward(fq_conv7_2_feats)
+
+        fq_conv8_2_feats, qo = self.extra_conv8_2.quantize_forward(fq_conv7_2_feats)
+        self.extra_conv9_2.pre_qo = qo
+        self.loc_layers[4].pre_qo = qo
+        self.conf_layers[4].pre_qo = qo
+        self.loc_layers[4].quantize_forward(fq_conv8_2_feats)
+        self.conf_layers[4].quantize_forward(fq_conv8_2_feats)
+
+        fq_conv9_2_feats, qo = self.extra_conv9_2.quantize_forward(fq_conv8_2_feats)
+        self.loc_layers[5].pre_qo = qo
+        self.conf_layers[5].pre_qo = qo
+        self.loc_layers[5].quantize_forward(fq_conv9_2_feats)
+        self.conf_layers[5].quantize_forward(fq_conv9_2_feats)
 
     def freeze(self):
         self.vgg_upto_conv4_3.freeze()
@@ -604,8 +654,18 @@ class SSD(nn.Module):
         self.extra_conv7_2.freeze()
         self.extra_conv8_2.freeze()
         self.extra_conv9_2.freeze()
+        
+        '''
+        self.loc_layers[0].freeze()
+        self.loc_layers[1].freeze()
+        self.loc_layers[2].freeze()
+        self.loc_layers[3].freeze()
+        self.loc_layers[4].freeze()
+        self.loc_layers[5].freeze()
+        '''
         for layer in self.loc_layers:
             layer.freeze()
+
         for layer in self.conf_layers:
             layer.freeze()
 

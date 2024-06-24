@@ -244,7 +244,7 @@ class QConv2d(QModule):
             self.qi.update(x)
             x = FakeQuantize.apply(x, self.qi)  # 对输入张量X完成量化
 
-        # foward前更新qw，保证量化weight时候scale正确
+        # forward前更新qw，保证量化weight时候scale正确
         self.qw.update(self.conv_module.weight.data)
         # 注意:此处主要为了统计各层x和weight范围，未对bias进行量化操作
         tmp_wgt = FakeQuantize.apply(self.conv_module.weight, self.qw)
@@ -376,6 +376,38 @@ class QReLU(QModule):
         x[x < self.qi.zero_point] = self.qi.zero_point
         x = self.qi.dequantize_tensor(x)
         return x
+    
+class QLeakyReLU(QModule):
+
+    def __init__(self, alpha, quant_type, qi=True, qo=False, num_bits=8, e_bits=3):
+        super(QLeakyReLU, self).__init__(quant_type, qi, qo, num_bits, e_bits)
+        self.alpha = alpha
+
+    def freeze(self, qi=None):
+
+        if hasattr(self, 'qi') and qi is not None:
+            raise ValueError('qi has been provided in init function.')
+        if not hasattr(self, 'qi') and qi is None:
+            raise ValueError('qi is not existed, should be provided.')
+
+        if qi is not None:
+            self.qi = qi
+
+    def forward(self, x):
+        if hasattr(self, 'qi'):
+            self.qi.update(x)
+            x = FakeQuantize.apply(x, self.qi)
+
+        x = F.leaky_relu(x, self.alpha)
+
+        return x
+
+    def quantize_inference(self, x):
+        device = x.device 
+        x = F.leaky_relu(x, self.alpha)
+        x = self.qi.quantize_tensor(x)
+        x = self.qi.dequantize_tensor(x)
+        return x
 
 class QReLU6(QModule):
 
@@ -418,6 +450,7 @@ class QMaxPooling2d(QModule):
         self.kernel_size = kernel_size
         self.stride = stride
         self.padding = padding
+        self.ceil_mode = ceil_mode
         
     def freeze(self, qi=None):
         if hasattr(self, 'qi') and qi is not None:
@@ -487,6 +520,43 @@ class QAdaptiveAvgPool2d(QModule):
         x = self.M * x
         # x = get_nearest_val(self.quant_type,x)
         x = x + self.qo.zero_point
+        x = self.qo.dequantize_tensor(x)
+        return x
+
+class QBN(QModule):
+
+    def __init__(self,quant_type, bn_module, qi=True, qo=True, num_bits=8, e_bits=3):
+        super(QBN, self).__init__(quant_type, qi, qo, num_bits, e_bits)
+        self.bn_model = bn_module
+
+    def freeze(self, qi=None):
+
+        if hasattr(self, 'qi') and qi is not None:
+            raise ValueError('qi has been provided in init function.')
+        if not hasattr(self, 'qi') and qi is None:
+            raise ValueError('qi is not existed, should be provided.')
+
+        if qi is not None:
+            self.qi = qi
+
+    def forward(self, x):
+        if hasattr(self, 'qi'):
+            self.qi.update(x)
+            x = FakeQuantize.apply(x, self.qi)
+
+        x = self.bn_model(x)
+
+        if hasattr(self, 'qo'):
+           self.qo.update(x)
+           x = FakeQuantize.apply(x, self.qo)
+
+        return x
+
+    def quantize_inference(self, x):
+        x = self.qi.quantize_tensor(x)
+        x = self.qi.dequantize_tensor(x)
+        x = self.bn_model(x)
+        x = self.qo.quantize_tensor(x)
         x = self.qo.dequantize_tensor(x)
         return x
     
