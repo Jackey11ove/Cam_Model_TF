@@ -12,16 +12,22 @@ from torch.autograd import Variable
 from data import VOC_ROOT, VOCAnnotationTransform, VOCDetection, BaseTransform
 from data import VOC_CLASSES as labelmap
 import torch.utils.data as data
+import openpyxl
 
 from ssd_model import SSD
+from extract_ratio import extract_ratio
+from util import *
+from module import *
 
+import gol
 import sys
+sys.path.append('/workspace/I/wangyuanzhe0/Cam_Model_TF')
 import os
 import time
 import argparse
 import numpy as np
 import pickle
-import cv2
+#import cv2
 
 if sys.version_info[0] == 2:
     import xml.etree.cElementTree as ET
@@ -36,7 +42,7 @@ def str2bool(v):
 parser = argparse.ArgumentParser(
     description='Single Shot MultiBox Detector Evaluation')
 parser.add_argument('--trained_model',
-                    default='weights/VOC.pth', type=str,
+                    default='/workspace/I/wangyuanzhe0/Cam_Model_TF/ssd/weights/VOC.pth', type=str,
                     help='Trained state_dict file path to open')
 parser.add_argument('--save_folder', default='eval/', type=str,
                     help='File path to save results')
@@ -177,6 +183,7 @@ def do_python_eval(output_dir='output', use_07=True):
         print('AP for {} = {:.4f}'.format(cls, ap))
         with open(os.path.join(output_dir, cls + '_pr.pkl'), 'wb') as f:
             pickle.dump({'rec': rec, 'prec': prec, 'ap': ap}, f)
+    mAP = np.mean(aps)
     print('Mean AP = {:.4f}'.format(np.mean(aps)))
     print('~~~~~~~~')
     print('Results:')
@@ -189,6 +196,7 @@ def do_python_eval(output_dir='output', use_07=True):
     print('Results computed with the **unofficial** Python eval code.')
     print('Results should be very close to the official MATLAB eval code.')
     print('--------------------------------------------------------------')
+    return mAP
 
 
 def voc_ap(rec, prec, use_07_metric=True):
@@ -361,7 +369,7 @@ cachedir: Directory for caching the annotations
     return rec, prec, ap
 
 
-def test_net(save_folder, quantize_flag, net:SSD, cuda, dataset, transform, top_k,
+def test_net(save_folder, quantize_flag, net, quant_type, num_bits, e_bits, cuda, dataset, transform, top_k,
              im_size=300, thresh=0.05):
     num_images = len(dataset)
     # all detections are collected into:
@@ -375,9 +383,9 @@ def test_net(save_folder, quantize_flag, net:SSD, cuda, dataset, transform, top_
     output_dir = get_output_dir('VOC_output', set_type)
     det_file = os.path.join(output_dir, 'detections.pkl')
 
-    # 这部分内容是为量化做准备，确定量化层并进行量化前向推理，确定数据范围
+
     if quantize_flag == True:
-        net.quantize(num_bits=16)
+        net.quantize(quant_type, num_bits, e_bits)
         net.eval()
         for i in range(num_images):
             im, gt, h, w = dataset.pull_item(i)
@@ -424,23 +432,23 @@ def test_net(save_folder, quantize_flag, net:SSD, cuda, dataset, transform, top_
                                                                  copy=False)
             all_boxes[j][i] = cls_dets
 
-        print('im_detect: {:d}/{:d} {:.3f}s'.format(i + 1,
-                                                    num_images, detect_time))
+        #print('im_detect: {:d}/{:d} {:.3f}s'.format(i + 1,num_images, detect_time))
 
     with open(det_file, 'wb') as f:
         pickle.dump(all_boxes, f, pickle.HIGHEST_PROTOCOL)
 
     print('Evaluating detections')
-    evaluate_detections(all_boxes, output_dir, dataset)
+    mAP = evaluate_detections(all_boxes, output_dir, dataset)
+    return mAP
 
 
 def evaluate_detections(box_list, output_dir, dataset):
     write_voc_results_file(box_list, dataset)
-    do_python_eval(output_dir)
+    mAP = do_python_eval(output_dir)
+    return mAP
 
 
 def modify_quant_state(quantized_state_dict, full_state_dict):
-    #左侧为全精度模型，右侧为量化模型
     name_mapping = {
         'vgg.0.weight':'vgg_upto_conv4_3.conv1.weight',
         'vgg.2.weight':'vgg_upto_conv4_3.conv2.weight',
@@ -527,42 +535,181 @@ def modify_quant_state(quantized_state_dict, full_state_dict):
         if old_name in full_state_dict:
             quantized_state_dict[new_name] = full_state_dict[old_name]
         else:
-            print(f"Warning: {old_name} not found in the full precision model state_dict")
+            print("Warning: model not found in the full precision model state_dict")
 
 
 if __name__ == '__main__':
     # load net
     num_classes = len(labelmap) + 1                      # +1 for background
-    net = SSD(num_classes)            # initialize SSD
+
+    #初始化全局字典
+    gol._init()
+
+    #输出文件初始化
+    ptq_result_path = 'ptq_result/'
+
+    excel_path = ptq_result_path+'/'+'SSD'+'.xlsx'
+    txt_path = ptq_result_path+'/'+'SSD'+'.txt'
+
+    workbook = openpyxl.Workbook()
+    ft = open(txt_path,'w')
+
+    #全精度模型
+    full_model = SSD(num_classes)            # initialize SSD
     full_state_dict = torch.load(args.trained_model)
-    quantized_state_dict = net.state_dict()
+    quantized_state_dict = full_model.state_dict()
     modify_quant_state(quantized_state_dict,full_state_dict)
-    net.load_state_dict(quantized_state_dict)
-    net.eval()
-    print('Finished loading model!')
+    full_model.load_state_dict(quantized_state_dict)
+    full_model.eval()
+    print('Finished loading full model!')
+
     # load data
     dataset = VOCDetection(args.voc_root, [('2007', set_type)],
                            BaseTransform(300, dataset_mean),
                            VOCAnnotationTransform())
     if args.cuda:
-        net = net.cuda()
+        full_model = full_model.cuda()
         cudnn.benchmark = True 
 
-    # evaluation
-    '''
     # full_inference:
     print('Evaluation of full_inference model:')
     quantize_flag = False
-    test_net(args.save_folder, quantize_flag, net, args.cuda, dataset,
+    full_mAP = test_net(args.save_folder, quantize_flag, full_model,'INT', 8, 3, args.cuda, dataset,
              BaseTransform(300, dataset_mean), args.top_k, 300,
              thresh=args.confidence_threshold)
-    '''
     
-    #'''
-    # quantize_inference
-    print('Evaluation of quantize_inference model:')
-    quantize_flag = True
-    test_net(args.save_folder, quantize_flag, net, args.cuda, dataset,
-             BaseTransform(300, dataset_mean), args.top_k, 300,
-             thresh=args.confidence_threshold)
-    #'''
+    Mac, Param, layer, par_ratio, macs_ratio = extract_ratio('SSD','voc2007')
+    full_names = []
+    full_params = []
+
+    for name, param in full_model.named_parameters():
+        if 'conv' in name or 'fc' in name:
+            full_names.append(name)
+            full_params.append(param.data.cpu())    
+    
+
+    quant_type_list = ['INT','POT','FLOAT'] #,'POT','FLOAT'
+    title_list = []
+    js_macs_list = []
+    js_param_list = []
+    ptq_mAP_list = []
+    mAP_loss_list = []
+
+    for quant_type in quant_type_list:
+        # FIXME:
+        num_bit_list = numbit_list(quant_type)
+        # num_bit_list = [8,16]
+        # 对一个量化类别，只需设置一次bias量化表
+        # int由于位宽大，使用量化表开销过大，直接_round即可
+        
+        for num_bits in num_bit_list:
+            # FIXME:
+            e_bit_list = ebit_list(quant_type,num_bits)
+            # e_bit_list = [5] 
+            for e_bits in e_bit_list:
+                if quant_type != 'INT':
+                    bias_list = build_bias_list(quant_type,num_bits,e_bits)
+                    gol.set_value(bias_list, is_bias=True)
+
+                if quant_type == 'FLOAT':
+                    title = '%s_%d_E%d' % (quant_type, num_bits, e_bits)
+                else:
+                    title = '%s_%d' % (quant_type, num_bits)
+                print('\n'+'SSD'+': PTQ: '+title)
+                title_list.append(title)
+
+                # 设置量化表
+                if quant_type != 'INT':
+                    plist = build_list(quant_type, num_bits, e_bits)
+                    gol.set_value(plist)
+                # quantize_inference
+                print('Evaluation of quantize_inference model:')
+
+                model_ptq = SSD(num_classes)
+                model_ptq.load_state_dict(quantized_state_dict)
+                model_ptq.eval()
+                if args.cuda:
+                    model_ptq = model_ptq.cuda()
+                    cudnn.benchmark = True
+                quantize_flag = True
+                ptq_mAP = test_net(args.save_folder, quantize_flag, model_ptq, quant_type, num_bits, e_bits, args.cuda, 
+                                   dataset, BaseTransform(300, dataset_mean), args.top_k, 300,
+                                   thresh=args.confidence_threshold)
+                ptq_mAP_list.append(ptq_mAP)
+                mAP_loss = (full_mAP - ptq_mAP)/full_mAP
+                mAP_loss_list.append(mAP_loss)
+
+                #将量化后分布反量化到全精度相同的scale
+                model_ptq.fakefreeze()
+                # 获取计算量/参数量下的js-div
+                js_macs = 0.
+                js_param = 0.
+                for name, param in model_ptq.named_parameters():
+                    if 'conv' not in name and 'fc' not in name:
+                        continue
+                        
+                    prefix = name.rsplit('.',1)[0]
+                    layer_idx = layer.index(prefix)
+                    name_idx = full_names.index(name)
+
+                    layer_idx = layer.index(prefix)
+                    ptq_param = param.data.cpu()
+
+                    # FIXME:
+                    js = js_div(ptq_param,full_params[name_idx])
+                    js = js.item()
+                    if js < 0.:
+                        js = 0.
+
+                    #TODO: 对于敏感度加权，可以用prefix作为key索引
+                    js_macs = js_macs + js * macs_ratio[layer_idx]
+                    js_param = js_param + js * par_ratio[layer_idx]
+
+
+                js_macs_list.append(js_macs)
+                js_param_list.append(js_param)
+
+                print(f"ptq mAP: {ptq_mAP:.10f}")
+
+                # 使用旧式的字符串格式化，并设置显示小数点后十位
+                print(f"{title}: js_macs: {js_macs:.10f}  js_param: {js_param:.10f} mAP_loss: {mAP_loss:.10f}")                
+                
+    # 写入xlsx
+    print("Check here!")
+    worksheet = workbook.active
+    worksheet.cell(row=1,column=1,value='FP32-mAP')
+    worksheet.cell(row=1,column=2,value=full_mAP)
+    worksheet.cell(row=1,column=3,value='Mac')
+    worksheet.cell(row=1,column=4,value=Mac)
+    worksheet.cell(row=1,column=5,value='Param')
+    worksheet.cell(row=1,column=6,value=Param)
+
+    worksheet.cell(row=3,column=1,value='title')
+    worksheet.cell(row=3,column=2,value='js_macs')
+    worksheet.cell(row=3,column=3,value='js_param')
+    worksheet.cell(row=3,column=4,value='ptq_mAP')
+    worksheet.cell(row=3,column=5,value='mAP_loss')
+    for i in range(len(title_list)):
+        worksheet.cell(row=i+4, column=1, value=title_list[i])
+        worksheet.cell(row=i+4, column=2, value=js_macs_list[i])
+        worksheet.cell(row=i+4, column=3, value=js_param_list[i])
+        worksheet.cell(row=i+4, column=4, value=ptq_mAP_list[i])
+        worksheet.cell(row=i+4, column=5, value=mAP_loss_list[i])
+
+    workbook.save(excel_path)
+    
+    print('SSD',file=ft)
+    print('Full_mAP: %f'%full_mAP,file=ft)
+    print('title_list:',file=ft)
+    print(title_list,file=ft)
+    print('js_macs_list:',file=ft)
+    print(js_macs_list, file=ft)
+    print('js_param_list:',file=ft)
+    print(js_param_list, file=ft)
+    print('ptq_mAP_list:',file=ft)
+    print(ptq_mAP_list, file=ft)
+    print('mAP_loss_list:',file=ft)
+    print(mAP_loss_list, file=ft)
+    print("\n",file=ft)
+
+    ft.close()

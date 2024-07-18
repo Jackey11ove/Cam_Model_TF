@@ -9,8 +9,7 @@ from layers.functions.detection import DetectModule
 from data import voc, coco
 
 import sys
-sys.path.append(r'C:\Users\Jackey\Desktop\Study\Cambricon_Internship\Model_Transfer\myprj')
-
+sys.path.append('/workspace/I/wangyuanzhe0/Cam_Model_TF')
 from l2norm import L2Norm
 from module import *
 
@@ -154,6 +153,18 @@ class Vgg_upto_Conv4_3(nn.Module):
         self.qrelu9.freeze(self.qconv9.qo)
         self.qconv10.freeze(qi=self.qconv9.qo)
         self.qrelu10.freeze(self.qconv10.qo)  #conv4-3
+    
+    def fakefreeze(self):
+        self.qconv1.fakefreeze()
+        self.qconv2.fakefreeze()
+        self.qconv3.fakefreeze()
+        self.qconv4.fakefreeze()
+        self.qconv5.fakefreeze()
+        self.qconv6.fakefreeze()
+        self.qconv7.fakefreeze()
+        self.qconv8.fakefreeze()
+        self.qconv9.fakefreeze()
+        self.qconv10.fakefreeze()
 
     def quantize_inference(self, x):
         qx = self.qconv1.quantize_inference(x)
@@ -267,6 +278,13 @@ class Vgg_upto_fc7(nn.Module):
         self.qconv15.freeze(qi=self.qconv14.qo)
         self.qrelu15.freeze(self.qconv15.qo)
 
+    def fakefreeze(self):
+        self.qconv11.fakefreeze()
+        self.qconv12.fakefreeze()
+        self.qconv13.fakefreeze()
+        self.qconv14.fakefreeze()
+        self.qconv15.fakefreeze()
+
     def quantize_inference(self, x):
         qx = self.qmax_pool2d4.quantize_inference(x)
     
@@ -319,6 +337,10 @@ class Extra_Conv6_2(nn.Module):
         self.qconv17.freeze(self.qconv16.qo)
         self.qrelu17.freeze(self.qconv17.qo)
 
+    def fakefreeze(self):
+        self.qconv16.fakefreeze()
+        self.qconv17.fakefreeze()
+
     def quantize_inference(self, x):
         qx = self.qconv16.quantize_inference(x)
         qx = self.qrelu16.quantize_inference(qx)
@@ -359,6 +381,10 @@ class Extra_Conv7_2(nn.Module):
         self.qrelu18.freeze(self.qconv18.qo)
         self.qconv19.freeze(self.qconv18.qo)
         self.qrelu19.freeze(self.qconv19.qo)
+
+    def fakefreeze(self):
+        self.qconv18.fakefreeze()
+        self.qconv19.fakefreeze()
 
     def quantize_inference(self, x):
         qx = self.qconv18.quantize_inference(x)
@@ -401,6 +427,10 @@ class Extra_Conv8_2(nn.Module):
         self.qconv21.freeze(self.qconv20.qo)
         self.qrelu21.freeze(self.qconv21.qo)
 
+    def fakefreeze(self):
+        self.qconv20.fakefreeze()
+        self.qconv21.fakefreeze()
+
     def quantize_inference(self, x):
         qx = self.qconv20.quantize_inference(x)
         qx = self.qrelu20.quantize_inference(qx)
@@ -442,6 +472,10 @@ class Extra_Conv9_2(nn.Module):
         self.qconv23.freeze(self.qconv22.qo)
         self.qrelu23.freeze(self.qconv23.qo)
 
+    def fakefreeze(self):
+        self.qconv22.fakefreeze()
+        self.qconv23.fakefreeze()
+
     def quantize_inference(self, x):
         qx = self.qconv22.quantize_inference(x)
         qx = self.qrelu22.quantize_inference(qx)
@@ -479,6 +513,9 @@ class Detector(nn.Module):
             self.qconv_loc.freeze()
         else:
             self.qconv_loc.freeze(qi=self.pre_qo)
+    
+    def fakefreeze(self):
+        self.qconv_loc.fakefreeze()
 
     def quantize_inference(self, x):
         qx = self.qconv_loc.quantize_inference(x)
@@ -513,6 +550,9 @@ class Classifier(nn.Module):
             self.qconv_conf.freeze()
         else:
             self.qconv_conf.freeze(qi=self.pre_qo)
+    
+    def fakefreeze(self):
+        self.qconv_conf.fakefreeze()
 
     def quantize_inference(self, x):
         qx = self.qconv_conf.quantize_inference(x)
@@ -668,6 +708,18 @@ class SSD(nn.Module):
 
         for layer in self.conf_layers:
             layer.freeze()
+
+    def fakefreeze(self):
+        self.vgg_upto_conv4_3.fakefreeze()
+        self.vgg_upto_fc7.fakefreeze()
+        self.extra_conv6_2.fakefreeze()
+        self.extra_conv7_2.fakefreeze()
+        self.extra_conv8_2.fakefreeze()
+        self.extra_conv9_2.fakefreeze()
+        for layer in self.loc_layers:
+            layer.fakefreeze()
+        for layer in self.conf_layers:
+            layer.fakefreeze()        
 
     def quantize_inference(self, x):
         qconv4_3_feats = self.vgg_upto_conv4_3.quantize_inference(x)

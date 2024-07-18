@@ -36,13 +36,14 @@
 # set constraint for RTX8000 to meet my cuda
 
 #- Log information
+
 echo "Job start at $(date "+%Y-%m-%d %H:%M:%S")"
 echo "Job run at:"
 echo "$(hostnamectl)"
 
 #- Load environments
 source /tools/module_env.sh
-source ~/Python3_env/bin/activate
+source /workspace/I/wangyuanzhe0/python3.8_env/bin/activate
 module list                       # list modules loaded
 
 ##- Tools
@@ -53,13 +54,14 @@ module load git/2.17.1
 module load vim/8.1.2424
 
 ##- language
-module load python3/3.6.8
+module load python3/3.8.16
 
 ##- CUDA
 module load cuda-cudnn/11.1-8.0.5
 
 ##- virtualenv
 # source xxxxx/activate
+
 echo $(module list)              # list modules loaded
 echo $(which gcc)
 echo $(which python)
@@ -75,8 +77,7 @@ echo "Use GPU ${CUDA_VISIBLE_DEVICES}"                              # which gpus
 #- The CUDA_VISIBLE_DEVICES variable is assigned and specified by SLURM
 #- Job step
 # [EDIT HERE(TODO)]
-cd myprj/ssd
-python ptq_one.py
+python yolo_v5/ptq_one.py
 
 #- End
 echo "Job end at $(date "+%Y-%m-%d %H:%M:%S")"

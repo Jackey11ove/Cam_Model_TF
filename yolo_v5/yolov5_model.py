@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import sys
-sys.path.append(r'C:\Users\Jackey\Desktop\Study\Cambricon_Internship\Model_Transfer\myprj')
+sys.path.append('/workspace/I/wangyuanzhe0/Cam_Model_TF')
 
 from module import *
 from utils.general import check_anchor_order
@@ -37,6 +37,9 @@ class Focus(nn.Module):
         self.qcat.freeze()
         self.conv.freeze()
 
+    def fakefreeze(self):
+        self.conv.fakefreeze()
+
     def quantize_inference(self,x):
         qarray = [x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]]
         cat_out = self.qcat.quantize_inference(qarray)
@@ -54,20 +57,29 @@ class Conv(nn.Module):
         return self.lkrelu(self.bn(self.conv(x)))
     
     def quantize(self, quant_type='INT', num_bits=8, e_bits=3):
-        self.qconvbn = QConvBN(quant_type, self.conv, self.bn, qi=True, qo=True, num_bits=num_bits, e_bits=e_bits)
+        self.qconv = QConv2d(quant_type, self.conv, qi=True, qo=True, num_bits=num_bits, e_bits=e_bits)
+        self.qbn = QBN(quant_type, self.bn, qi=True, qo=True, num_bits=num_bits, e_bits=e_bits)
         self.qlkrelu = QLeakyReLU(0.1, quant_type, qi=True, qo=False, num_bits=num_bits, e_bits=e_bits)
 
     def quantize_forward(self, x):
-        x = self.qconvbn(x)
+        x = self.qconv(x)
+        x = self.qbn(x)
         x = self.qlkrelu(x)
         return x
     
     def freeze(self):
-        self.qconvbn.freeze()
+        self.qconv.freeze()
+        self.qbn.freeze()
         self.qlkrelu.freeze()
 
+    def fakefreeze(self):
+        self.qconv.fakefreeze()
+        self.qbn.fakefreeze()
+        self.qlkrelu.fakefreeze()
+
     def quantize_inference(self, x):
-        qx = self.qconvbn.quantize_inference(x)
+        qx = self.qconv.quantize_inference(x)
+        qx = self.qbn.quantize_inference(qx)
         qx = self.qlkrelu.quantize_inference(qx)
         return qx
     
@@ -107,6 +119,10 @@ class Bottleneck(nn.Module):
         else:
             self.cv1.freeze()
             self.cv2.freeze()
+
+    def fakefreeze(self):
+        self.cv1.fakefreeze()
+        self.cv2.fakefreeze()
 
     def quantize_inference(self,x):
         if self.add:
@@ -175,6 +191,16 @@ class BottleneckCSP(nn.Module):
         self.qbn.freeze()
         self.qlkrelu.freeze()
         self.cv4.freeze()
+    
+    def fakefreeze(self):
+        self.cv1.fakefreeze()
+        for Bottleneck in self.Bottleneck_layers:
+            Bottleneck.fakefreeze()
+        self.qcv3.fakefreeze()
+        self.qcv2.fakefreeze()
+        self.qbn.fakefreeze()
+        self.qlkrelu.fakefreeze()
+        self.cv4.fakefreeze()
 
     def quantize_inference(self,x):
         y1 = self.cv1.quantize_inference(x)
@@ -224,6 +250,12 @@ class SPP(nn.Module):
             layer.freeze()
         self.qcat.freeze()
         self.cv2.freeze()
+
+    def fakefreeze(self):
+        self.cv1.fakefreeze()
+        for layer in self.qmaxpool_layers:
+            layer.fakefreeze()
+        self.cv2.fakefreeze()
 
     def quantize_inference(self,x):
         qx = self.cv1.quantize_inference(x)
@@ -276,6 +308,12 @@ class ResBlock(nn.Module):
             self.SPP.freeze()
         self.BottleneckCSP.freeze()
 
+    def fakefreeze(self):
+        self.Conv.fakefreeze()
+        if self.SPP_flag == True:
+            self.SPP.fakefreeze()
+        self.BottleneckCSP.fakefreeze()
+
     def quantize_inference(self,x):
         qx = self.Conv.quantize_inference(x)
         if self.SPP_flag == True:
@@ -322,6 +360,13 @@ class CSPDarknet(nn.Module):
         self.ResBlock2.freeze()
         self.ResBlock3.freeze()
         self.ResBlock4.freeze()
+    
+    def fakefreeze(self):
+        self.Focus.fakefreeze()
+        self.ResBlock1.fakefreeze()
+        self.ResBlock2.fakefreeze()
+        self.ResBlock3.fakefreeze()
+        self.ResBlock4.fakefreeze()
 
     def quantize_inference(self,x):
         qx = self.Focus.quantize_inference(x)
@@ -435,6 +480,21 @@ class main_net(nn.Module):
         self.Conv4.freeze()
         self.qcat4.freeze()
         self.BottleneckCSP4.freeze()
+    
+    def fakefreeze(self):
+        self.CSPDarknet.fakefreeze()
+
+        self.Conv1.fakefreeze()
+        self.BottleneckCSP1.fakefreeze()
+
+        self.Conv2.fakefreeze()
+        self.BottleneckCSP2.fakefreeze()
+
+        self.Conv3.fakefreeze()
+        self.BottleneckCSP3.fakefreeze()
+
+        self.Conv4.fakefreeze()
+        self.BottleneckCSP4.fakefreeze()
 
     def quantize_inference(self,x):
         feature1, feature2, feature3 = self.CSPDarknet.quantize_inference(x)
@@ -553,6 +613,9 @@ class Yolo_v5(nn.Module):
     
     def freeze(self):
         self.main_net.freeze()
+
+    def fakefreeze(self):
+        self.main_net.fakefreeze()
 
     def quantize_inference(self,x):
         Head1, Head2, Head3 = self.main_net.quantize_inference(x)
